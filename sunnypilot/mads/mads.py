@@ -66,8 +66,12 @@ class ModifiedAssistDrivingSystem:
         self.selfdrive.events.remove(EventName.buttonEnable)
 
     if self.main_enabled_toggle:
-      if CS.cruiseState.available:
-        self.selfdrive.events.add(EventName.lkasEnable)
+      if self.selfdrive.CP.pcmCruise:
+        if CS.cruiseState.available and not self.selfdrive.CS_prev.cruiseState.available:
+          self.selfdrive.events.add(EventName.lkasEnable)
+      else:
+        if any(be.type == ButtonType.mainCruise and not be.pressed for be in CS.buttonEvents):
+          self.selfdrive.events.add(EventName.lkasEnable)
 
     for be in CS.buttonEvents:
       if be.type == ButtonType.cancel:
@@ -83,8 +87,6 @@ class ModifiedAssistDrivingSystem:
           if not self.selfdrive.enabled_prev:
             self.selfdrive.events.add(EventName.lkasEnable)
 
-    if not self.available:
-      self.selfdrive.events.add(EventName.lkasDisable)
     self.selfdrive.events.remove(EventName.pedalPressed)
 
   def update(self, CS: car.CarState):
