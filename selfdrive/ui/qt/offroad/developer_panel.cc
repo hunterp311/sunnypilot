@@ -52,4 +52,7 @@ DeveloperPanel::DeveloperPanel(SettingsWindow *parent) : ListWidget(parent) {
 
   auto toyotaebsmToggle = new ParamControl("ToyotaEnhancedBsm", tr("Toyota: Enhanced BSM"), "", "");
   addItem(toyotaebsmToggle);
+
+  auto toyotatss2longToggle = new ParamControl("ToyotaTSS2Long", tr("Toyota: custom tune"), "", "");
+  addItem(toyotatss2longToggle);
 }

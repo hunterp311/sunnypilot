@@ -47,6 +47,10 @@ def manager_init() -> None:
     ("MadsCruiseMain", "1"),
     ("MadsDisengageLateralOnBrake", "0"),
     ("MadsUnifiedEngagementMode", "1"),
+
+    ("ToyotaAutoHold", "0"),
+    ("ToyotaEnhancedBsm", "0"),
+    ("ToyotaTSS2Long", "0"),
   ]
 
   if params.get_bool("RecordFrontLock"):
