@@ -46,4 +46,10 @@ DeveloperPanel::DeveloperPanel(SettingsWindow *parent) : ListWidget(parent) {
 
   auto madsUnifiedEngagementModeToggle = new ParamControl("MadsUnifiedEngagementMode", tr("MADS: Unified Engagement Mode"), "", "");
   addItem(madsUnifiedEngagementModeToggle);
+
+  auto toyotaabhToggle = new ParamControl("ToyotaAutoHold", tr("Toyota: Auto Brake Hold"), "", "");
+  addItem(toyotaabhToggle);
+
+  auto toyotaebsmToggle = new ParamControl("ToyotaEnhancedBsm", tr("Toyota: Enhanced BSM"), "", "");
+  addItem(toyotaebsmToggle);
 }
