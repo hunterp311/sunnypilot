@@ -1,6 +1,6 @@
 from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.car import CanBusBase
-from openpilot.selfdrive.car.honda.values import HondaFlags, HONDA_BOSCH, HONDA_BOSCH_RADARLESS, CAR, CarControllerParams
+from openpilot.selfdrive.car.honda.values import HondaFlags, HONDA_BOSCH, HONDA_BOSCH_RADARLESS, HONDA_CANFD_CAR, CAR, CarControllerParams
 
 # CAN bus layout with relay
 # 0 = ACC-CAN - radar side
@@ -14,7 +14,7 @@ class CanBus(CanBusBase):
     # use fingerprint if specified
     super().__init__(CP if fingerprint is None else None, fingerprint)
 
-    if CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS):
+    if CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS - HONDA_CANFD_CAR):
       self._pt, self._radar = self.offset + 1, self.offset
     else:
       self._pt, self._radar = self.offset, self.offset + 1
@@ -33,7 +33,7 @@ class CanBus(CanBusBase):
 
 
 def get_lkas_cmd_bus(CAN, car_fingerprint, radar_disabled=False):
-  no_radar = car_fingerprint in HONDA_BOSCH_RADARLESS
+  no_radar = car_fingerprint in (HONDA_BOSCH_RADARLESS | HONDA_CANFD_CAR)
   if radar_disabled or no_radar:
     # when radar is disabled, steering commands are sent directly to powertrain bus
     return CAN.pt
@@ -43,7 +43,7 @@ def get_lkas_cmd_bus(CAN, car_fingerprint, radar_disabled=False):
 
 def get_cruise_speed_conversion(car_fingerprint: str, is_metric: bool) -> float:
   # on certain cars, CRUISE_SPEED changes to imperial with car's unit setting
-  return CV.MPH_TO_MS if car_fingerprint in HONDA_BOSCH_RADARLESS and not is_metric else CV.KPH_TO_MS
+  return CV.MPH_TO_MS if car_fingerprint in (HONDA_BOSCH_RADARLESS | HONDA_CANFD_CAR) and not is_metric else CV.KPH_TO_MS
 
 
 def create_brake_command(packer, CAN, apply_brake, pump_on, pcm_override, pcm_cancel_cmd, fcw, car_fingerprint, stock_brake):
@@ -140,7 +140,7 @@ def create_bosch_supplemental_1(packer, CAN, car_fingerprint):
   return packer.make_can_msg("BOSCH_SUPPLEMENTAL_1", bus, values)
 
 
-def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_hud, lkas_hud):
+def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_hud, lkas_hud, lat_active):
   commands = []
   radar_disabled = CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS) and CP.openpilotLongitudinalControl
   bus_lkas = get_lkas_cmd_bus(CAN, CP.carFingerprint, radar_disabled)
@@ -175,7 +175,8 @@ def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_
   lkas_hud_values = {
     'SET_ME_X41': 0x41,
     'STEERING_REQUIRED': hud.steer_required,
-    'SOLID_LANES': hud.lanes_visible,
+    'SOLID_LANES': lat_active,
+    'DASHED_LANES': hud.dashed_lanes,
     'BEEP': 0,
   }
 
@@ -184,6 +185,10 @@ def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_
     lkas_hud_values['DASHED_LANES'] = hud.lanes_visible
     # car likely needs to see LKAS_PROBLEM fall within a specific time frame, so forward from camera
     lkas_hud_values['LKAS_PROBLEM'] = lkas_hud['LKAS_PROBLEM']
+
+  if CP.carFingerprint in HONDA_CANFD_CAR:
+    lkas_hud_values['LANE_LINES'] = 3
+    lkas_hud_values['DASHED_LANES'] = hud.lanes_visible
 
   if not (CP.flags & HondaFlags.BOSCH_EXT_HUD):
     lkas_hud_values['SET_ME_X48'] = 0x48
