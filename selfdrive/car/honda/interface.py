@@ -5,7 +5,7 @@ from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import interp
 from openpilot.selfdrive.car.honda.hondacan import CanBus
 from openpilot.selfdrive.car.honda.values import CarControllerParams, CruiseButtons, CruiseSettings, HondaFlags, CAR, HONDA_BOSCH, \
-                                                 HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS
+                                                 HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_CANFD_CAR
 from openpilot.selfdrive.car import create_button_events, get_safety_config
 from openpilot.selfdrive.car.interfaces import CarInterfaceBase
 from openpilot.selfdrive.car.disable_ecu import disable_ecu
@@ -40,7 +40,14 @@ class CarInterface(CarInterfaceBase):
 
     CAN = CanBus(ret, fingerprint)
 
-    if candidate in HONDA_BOSCH:
+    if candidate in HONDA_CANFD_CAR:
+      cfgs = [get_safety_config(car.CarParams.SafetyModel.hondaBosch)]
+      if CAN.pt >= 4:
+        cfgs.insert(0, get_safety_config(car.CarParams.SafetyModel.noOutput))
+      ret.safetyConfigs = cfgs
+      ret.radarUnavailable = True
+      ret.openpilotLongitudinalControl = False
+    elif candidate in HONDA_BOSCH:
       ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.hondaBosch)]
       ret.radarUnavailable = True
       # Disable the radar and let openpilot control longitudinal
@@ -67,6 +74,9 @@ class CarInterface(CarInterfaceBase):
     # Accord ICE 1.5T CVT has different gearbox message
     if candidate == CAR.HONDA_ACCORD and 0x191 in fingerprint[CAN.pt]:
       ret.transmissionType = TransmissionType.cvt
+    # New Civics can have manual transmission
+    elif candidate == CAR.HONDA_CIVIC_2022 and 0x191 not in fingerprint[CAN.pt]:
+      ret.transmissionType = TransmissionType.manual
 
     # Certain Hondas have an extra steering sensor at the bottom of the steering rack,
     # which improves controls quality as it removes the steering column torsion from feedback.
@@ -77,13 +87,17 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kf = 0.00006  # conservative feed-forward
 
     if candidate in HONDA_BOSCH:
-      ret.longitudinalActuatorDelay = 0.5 # s
+      ret.longitudinalTuning.kpV = [0.25]
+      ret.longitudinalTuning.kiV = [0.05]
+      ret.longitudinalActuatorDelayUpperBound = 0.5 # s
       if candidate in HONDA_BOSCH_RADARLESS:
         ret.stopAccel = CarControllerParams.BOSCH_ACCEL_MIN  # stock uses -4.0 m/s^2 once stopped but limited by safety model
     else:
       # default longitudinal tuning for all hondas
-      ret.longitudinalTuning.kiBP = [0., 5., 35.]
-      ret.longitudinalTuning.kiV = [1.2, 0.8, 0.5]
+      ret.longitudinalTuning.kpBP = [0., 5., 35.]
+      ret.longitudinalTuning.kpV = [1.2, 0.8, 0.5]
+      ret.longitudinalTuning.kiBP = [0., 35.]
+      ret.longitudinalTuning.kiV = [0.18, 0.12]
 
     eps_modified = False
     for fw in car_fw:
@@ -112,6 +126,10 @@ class CarInterface(CarInterfaceBase):
         ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]  # TODO: determine if there is a dead zone at the top end
         ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
 
+    elif candidate == CAR.HONDA_ACCORD_11G:
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.18]]
+      
     elif candidate == CAR.HONDA_ACCORD:
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]  # TODO: determine if there is a dead zone at the top end
 
@@ -141,7 +159,7 @@ class CarInterface(CarInterfaceBase):
         ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.64], [0.192]]
       ret.wheelSpeedFactor = 1.025
 
-    elif candidate == CAR.HONDA_CRV_HYBRID:
+    elif candidate in (CAR.HONDA_CRV_HYBRID, CAR.HONDA_CRV_HYBRID_6G, CAR.HONDA_CRV_6G):
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]  # TODO: determine if there is a dead zone at the top end
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.6], [0.18]]
       ret.wheelSpeedFactor = 1.025
@@ -174,6 +192,11 @@ class CarInterface(CarInterfaceBase):
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
       ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.,20], [0.,20]]
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.4,0.3], [0,0]]
+      tire_stiffness_factor = 0.8467
+      ret.longitudinalTuning.kpBP = [0., 5., 35.]
+      ret.longitudinalTuning.kpV = [2.4, 1.6, 0.8]
+      ret.longitudinalTuning.kiBP = [0., 35.]
+      ret.longitudinalTuning.kiV = [0.2, 0.16]
 
     elif candidate in (CAR.HONDA_ODYSSEY, CAR.HONDA_ODYSSEY_CHN):
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.28], [0.08]]
@@ -182,7 +205,7 @@ class CarInterface(CarInterfaceBase):
       else:
         ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]  # TODO: determine if there is a dead zone at the top end
 
-    elif candidate == CAR.HONDA_PILOT:
+    elif candidate in (CAR.HONDA_PILOT, CAR.HONDA_PILOT_4G):
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]  # TODO: determine if there is a dead zone at the top end
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.38], [0.11]]
 
@@ -239,7 +262,7 @@ class CarInterface(CarInterfaceBase):
     if ret.enableGasInterceptorDEPRECATED and candidate not in HONDA_BOSCH:
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_HONDA_GAS_INTERCEPTOR
 
-    if candidate in HONDA_BOSCH_RADARLESS:
+    if candidate in (HONDA_BOSCH_RADARLESS| HONDA_CANFD_CAR):
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_HONDA_RADARLESS
 
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
@@ -261,58 +284,52 @@ class CarInterface(CarInterfaceBase):
   # returns a car.CarState
   def _update(self, c):
     ret = self.CS.update(self.cp, self.cp_cam, self.cp_body)
+    self.sp_update_params()
 
-    self.CS.button_events = [
+    buttonEvents = [
       *create_button_events(self.CS.cruise_buttons, self.CS.prev_cruise_buttons, BUTTONS_DICT),
       *create_button_events(self.CS.cruise_setting, self.CS.prev_cruise_setting, SETTINGS_BUTTONS_DICT),
     ]
 
-    self.CS.mads_enabled = self.get_sp_cruise_main_state(ret)
+    self.CS.mads_enabled = self.get_sp_cruise_main_state(ret, self.CS)
 
-    self.CS.accEnabled = self.get_sp_v_cruise_non_pcm_state(ret, c.vCruise, self.CS.accEnabled)
+    self.CS.accEnabled = self.get_sp_v_cruise_non_pcm_state(ret, self.CS.accEnabled,
+                                                            buttonEvents, c.vCruise)
 
     if ret.cruiseState.available:
       if self.enable_mads:
         if not self.CS.prev_mads_enabled and self.CS.mads_enabled:
           self.CS.madsEnabled = True
-        if any(b.type == ButtonType.altButton1 and b.pressed for b in self.CS.button_events):
+        if self.CS.prev_cruise_setting != 1 and self.CS.cruise_setting == 1:
           self.CS.madsEnabled = not self.CS.madsEnabled
-        self.CS.madsEnabled = self.get_acc_mads(ret, self.CS.madsEnabled)
+        self.CS.madsEnabled = self.get_acc_mads(ret.cruiseState.enabled, self.CS.accEnabled, self.CS.madsEnabled)
     else:
       self.CS.madsEnabled = False
 
-    min_enable_speed_pcm = self.CP.pcmCruise and self.CP.minEnableSpeed > 0 and self.CP.pcmCruiseSpeed
-
-    if not self.CP.pcmCruise or min_enable_speed_pcm or not self.CP.pcmCruiseSpeed:
-      if any(b.type == ButtonType.cancel for b in self.CS.button_events):
-        self.get_sp_cancel_cruise_state()
+    if not self.CP.pcmCruise or (self.CP.pcmCruise and self.CP.minEnableSpeed > 0) or not self.CP.pcmCruiseSpeed:
+      if any(b.type == ButtonType.cancel for b in buttonEvents):
+        self.CS.madsEnabled, self.CS.accEnabled = self.get_sp_cancel_cruise_state(self.CS.madsEnabled)
     if self.get_sp_pedal_disengage(ret):
-      self.get_sp_cancel_cruise_state()
-      ret.cruiseState.enabled = ret.cruiseState.enabled if not self.enable_mads or min_enable_speed_pcm \
-                                                        else False if self.CP.pcmCruise \
-                                                        else self.CS.accEnabled
+      self.CS.madsEnabled, self.CS.accEnabled = self.get_sp_cancel_cruise_state(self.CS.madsEnabled)
+      ret.cruiseState.enabled = False if self.CP.pcmCruise else self.CS.accEnabled
 
-    if min_enable_speed_pcm:
+    if self.CP.pcmCruise and self.CP.minEnableSpeed > 0 and self.CP.pcmCruiseSpeed:
       if ret.gasPressed and not ret.cruiseState.enabled:
         self.CS.accEnabled = False
-      if ret.cruiseState.enabled and not self.CS.out.cruiseState.enabled:
-        self.CS.accEnabled = True
-      elif not ret.cruiseState.enabled:
-        self.CS.accEnabled = False
+      self.CS.accEnabled = self.CS.pcm_cruise_enabled
 
-    ret = self.get_sp_common_state(ret)
+    ret, self.CS = self.get_sp_common_state(ret, self.CS,
+                                            min_enable_speed_pcm=(self.CP.pcmCruise and self.CP.minEnableSpeed > 0 and self.CP.pcmCruiseSpeed),
+                                            gap_button=(self.CS.cruise_setting == 3))
 
-    ret.buttonEvents = [
-      *self.CS.button_events,
-      *self.button_events.create_mads_event(self.CS.madsEnabled, self.CS.out.madsEnabled)  # MADS BUTTON
-    ]
+    ret.buttonEvents = buttonEvents
 
     # events
     events = self.create_common_events(ret, c, extra_gears=[GearShifter.sport, GearShifter.low], pcm_enable=False)
     if self.CP.pcmCruise and ret.vEgo < self.CP.minEnableSpeed and not self.CS.madsEnabled:
       events.add(EventName.belowEngageSpeed)
 
-    events, ret = self.create_sp_events(ret, events)
+    events, ret = self.create_sp_events(self.CS, ret, events)
 
     #if self.CP.pcmCruise:
     #  # we engage when pcm is active (rising edge)
@@ -329,7 +346,9 @@ class CarInterface(CarInterfaceBase):
     if self.CS.CP.minEnableSpeed > 0 and ret.vEgo < 0.001:
       events.add(EventName.manualRestart)
 
-    ret.customStockLong = self.update_custom_stock_long()
+    ret.customStockLong = self.CS.update_custom_stock_long(self.CC.cruise_button, self.CC.final_speed_kph,
+                                                           self.CC.target_speed, self.CC.v_set_dis,
+                                                           self.CC.speed_diff, self.CC.button_type)
 
     ret.events = events.to_msg()
 
