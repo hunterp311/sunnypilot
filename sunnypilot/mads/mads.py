@@ -15,10 +15,14 @@ class ModifiedAssistDrivingSystem:
     self.enabled = False
     self.active = False
     self.available = False
+    self.allowed_always = False
     self.selfdrive = selfdrive
     self.selfdrive.enabled_prev = False
     self.selfdrive.active_prev = False
     self.state_machine = StateMachine(self)
+
+    if self.selfdrive.CP.carName == "hyundai":
+      self.allowed_always = True
 
     # TODO-SP: do we need to pass the params object from SelfdriveD?
     self.enabled_toggle = mads_params.read_param("Mads", self.selfdrive.params)
@@ -26,18 +30,7 @@ class ModifiedAssistDrivingSystem:
     self.disengage_lateral_on_brake_toggle = mads_params.read_param("MadsDisengageLateralOnBrake", self.selfdrive.params)
     self.unified_engagement_mode = mads_params.read_param("MadsUnifiedEngagementMode", self.selfdrive.params)
 
-  def update_availability(self, CS: car.CarState) -> None:
-    if self.main_enabled_toggle:
-      self.available = CS.cruiseState.available
-
-    if self.selfdrive.CP.carName == "hyundai":
-      if any(be.type == ButtonType.lkas and be.pressed for be in CS.buttonEvents):
-        self.available = True
-
   def update_events(self, CS: car.CarState):
-    self.selfdrive.events.remove(EventName.pcmDisable)
-    self.selfdrive.events.remove(EventName.buttonCancel)
-
     if self.selfdrive.enabled_prev:
       if self.selfdrive.events.has(EventName.wrongGear) and CS.vEgo < 5:
         self.selfdrive.events.add(EventName.silentWrongGear)
@@ -65,35 +58,37 @@ class ModifiedAssistDrivingSystem:
       if self.selfdrive.events.has(EventName.buttonEnable):
         self.selfdrive.events.remove(EventName.buttonEnable)
 
-    if self.main_enabled_toggle:
-      if self.selfdrive.CP.pcmCruise:
-        if CS.cruiseState.available and not self.selfdrive.CS_prev.cruiseState.available:
-          self.selfdrive.events.add(EventName.lkasEnable)
-      else:
-        if any(be.type == ButtonType.mainCruise and not be.pressed for be in CS.buttonEvents):
-          self.selfdrive.events.add(EventName.lkasEnable)
-
-    for be in CS.buttonEvents:
-      if be.type == ButtonType.cancel:
-        if self.selfdrive.enabled_prev:
-          self.selfdrive.events.add(EventName.manualLongitudinalRequired)
-      if be.type == ButtonType.lkas and be.pressed:
-        if self.active:
-          if self.selfdrive.enabled_prev:
-            self.selfdrive.events.add(EventName.manualSteeringRequired)
-          else:
-            self.selfdrive.events.add(EventName.lkasDisable)
-        else:
-          if not self.selfdrive.enabled_prev:
+    if CS.cruiseState.available or self.allowed_always:
+      if self.main_enabled_toggle:
+        if self.selfdrive.CP.pcmCruise:
+          if CS.cruiseState.available and not self.selfdrive.CS_prev.cruiseState.available:
             self.selfdrive.events.add(EventName.lkasEnable)
+        else:
+          if any(be.type == ButtonType.mainCruise and not be.pressed for be in CS.buttonEvents):
+            self.selfdrive.events.add(EventName.lkasEnable)
+
+      for be in CS.buttonEvents:
+        if be.type == ButtonType.cancel:
+          if self.selfdrive.enabled_prev:
+            self.selfdrive.events.add(EventName.manualLongitudinalRequired)
+        if be.type == ButtonType.lkas and be.pressed:
+          if self.active:
+            if self.selfdrive.enabled_prev:
+              self.selfdrive.events.add(EventName.manualSteeringRequired)
+            else:
+              self.selfdrive.events.add(EventName.lkasDisable)
+          else:
+            if not self.selfdrive.enabled_prev:
+              self.selfdrive.events.add(EventName.lkasEnable)
+
+      self.selfdrive.events.remove(EventName.pcmDisable)
+      self.selfdrive.events.remove(EventName.buttonCancel)
 
     self.selfdrive.events.remove(EventName.pedalPressed)
 
   def update(self, CS: car.CarState):
     if not self.enabled_toggle:
       return
-
-    self.update_availability(CS)
 
     self.update_events(CS)
 
